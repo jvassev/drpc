@@ -1,37 +1,29 @@
 package com.github.drpc.grpc;
 
-import io.grpc.Channel;
-import io.grpc.Metadata;
-import io.grpc.MethodDescriptor;
-import io.grpc.Server;
-import io.grpc.ServerBuilder;
-import io.grpc.ServerCall;
-import io.grpc.ServerCall.Listener;
-import io.grpc.ServerCallHandler;
-import io.grpc.ServerInterceptor;
-import io.grpc.ServerInterceptors;
-import io.grpc.ServerServiceDefinition;
-
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
+import java.util.UUID;
 
 import com.github.drpc.AbstractDrpcServer;
 import com.github.drpc.DrpcServer;
 import com.github.drpc.membership.Membership;
 import com.github.drpc.membership.Node;
 import com.google.common.cache.Cache;
-import com.google.common.reflect.Reflection;
+import io.grpc.BindableService;
+import io.grpc.Channel;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import net.sf.cglib.proxy.Enhancer;
 
 public final class GrpcDrpcServer extends AbstractDrpcServer implements DrpcServer {
 
     private ServerBuilder<?> serverBuilder;
-
     private Server server;
 
     private Cache<Node, Channel> channelCache;
+    private final String name;
 
     public GrpcDrpcServer(Membership membership) {
         super(membership);
+        name = UUID.randomUUID().toString();
     }
 
     public void setServerBuilder(ServerBuilder<?> sb) {
@@ -60,49 +52,18 @@ public final class GrpcDrpcServer extends AbstractDrpcServer implements DrpcServ
     }
 
     @Override
-    public <T> void addService(Class<T> svcClass, T impl) {
-        InvocationHandler handler = new RoutingInvocationHandler(impl, membership, consistentHash,
-                routeKeyExtractor, svcClass.getEnclosingClass(), svcClass, channelCache);
+    public <T> void addService(Class<T> serviceType, T service) {
+        Enhancer enhancer = new Enhancer();
+        enhancer.setSuperclass(serviceType);
+        RoutingInvocationHandler callback = new RoutingInvocationHandler(
+                (BindableService) service, membership,
+                consistentHash, routeKeyExtractor,
+                serviceType, channelCache);
 
-        T bindableService = Reflection.newProxy(svcClass, handler);
+        enhancer.setCallback(callback);
+        BindableService proxy = (BindableService) enhancer.create();
 
-        Method bindServiceMethod = findBindMethod(svcClass);
-
-        try {
-            Object def = bindServiceMethod.invoke(null, bindableService);
-
-            ServerServiceDefinition intercepted = ServerInterceptors.intercept(
-                    (ServerServiceDefinition) def,
-                    new ServerInterceptor() {
-                        @Override
-                        public <ReqT, RespT> Listener<ReqT> interceptCall(
-                                MethodDescriptor<ReqT, RespT> method, ServerCall<RespT> call,
-                                Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-                            try {
-                                MethodDescriptorStash.set(method);
-                                return next.startCall(method, call, headers);
-                            } finally {
-                                MethodDescriptorStash.set(null);
-                            }
-                        }
-                    });
-            serverBuilder.addService(intercepted);
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException("gRPC changed incompatibly", e);
-        }
-    }
-
-    private <T> Method findBindMethod(Class<T> svc) {
-        Class<?> grpc = svc.getEnclosingClass();
-
-        try {
-            Method bindServiceMethod = grpc.getMethod("bindService", new Class[] { svc });
-            return bindServiceMethod;
-        } catch (NoSuchMethodException | SecurityException e) {
-            throw new RuntimeException("gRPC changed incompatibly", e);
-        }
+        serverBuilder.addService(proxy);
     }
 
     public void setChannelCache(Cache<Node, Channel> channelCache) {

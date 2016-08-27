@@ -1,11 +1,5 @@
 package com.github.drpc.grpc;
 
-import io.grpc.Channel;
-import io.grpc.MethodDescriptor;
-import io.grpc.netty.NettyChannelBuilder;
-import io.grpc.stub.AbstractStub;
-
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,53 +10,71 @@ import com.github.drpc.ch.RendezvousHash2;
 import com.github.drpc.membership.Membership;
 import com.github.drpc.membership.Node;
 import com.google.common.cache.Cache;
-import com.google.common.reflect.AbstractInvocationHandler;
+import io.grpc.BindableService;
+import io.grpc.Channel;
+import io.grpc.netty.NettyChannelBuilder;
+import io.grpc.stub.AbstractStub;
+import net.sf.cglib.proxy.MethodInterceptor;
+import net.sf.cglib.proxy.MethodProxy;
 
-class RoutingInvocationHandler extends AbstractInvocationHandler {
+class RoutingInvocationHandler implements MethodInterceptor {
 
-    private final Object localService;
+    private final BindableService localService;
     private final Membership membership;
     private final RendezvousHash2<String, Node> consistentHash;
     private final RouteKeyExtractor routeKeyExtractor;
-    private final Class<?> grpcFacadeClass;
     private final Cache<Node, Channel> channelCache;
 
     private final Map<Method, Method> clientToServer;
     private final Class<?> serviceClass;
+    private Method newStubMethod;
 
-    public RoutingInvocationHandler(Object impl, Membership membership,
+    public RoutingInvocationHandler(BindableService localService, Membership membership,
             RendezvousHash2<String, Node> consistentHash, RouteKeyExtractor routeKeyExtractor,
-            Class<?> grpcFacadeClass, Class<?> serviceClass, Cache<Node, Channel> channelCache) {
+            Class<?> serviceClass, Cache<Node, Channel> channelCache) {
 
-        this.localService = impl;
+        this.localService = localService;
         this.membership = membership;
         this.consistentHash = consistentHash;
         this.routeKeyExtractor = routeKeyExtractor;
-        this.grpcFacadeClass = grpcFacadeClass;
         this.serviceClass = serviceClass;
         this.channelCache = channelCache;
 
-        this.clientToServer = new HashMap<Method, Method>(10);
+        try {
+            newStubMethod = serviceClass.getEnclosingClass().getMethod("newStub", Channel.class);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException("gRPC changed incompatibly", e);
+        }
+
+        this.clientToServer = new HashMap<>(10);
         initMapping();
     }
 
     private void initMapping() {
-        AbstractStub<?> stub = newStub(new FakeChannel());
+        Class<?> stubClass = newStubMethod.getReturnType();
+
         for (Method m : serviceClass.getMethods()) {
             try {
-                Method found = stub.getClass().getMethod(m.getName(), m.getParameterTypes());
+                Method found = stubClass.getMethod(m.getName(), m.getParameterTypes());
                 clientToServer.put(m, found);
             } catch (ReflectiveOperationException e) {
-                throw new RuntimeException("gRPC changed incompatibly", e);
+
             }
         }
     }
 
     @Override
-    protected Object handleInvocation(Object proxy, Method method, Object[] args) throws Throwable {
-        MethodDescriptor<?, ?> descriptor = MethodDescriptorStash.get();
+    public Object intercept(Object target, Method method, Object[] args,
+            MethodProxy methodProxy) throws Throwable {
 
-        String routingKey = routeKeyExtractor.extractRoutingKey(descriptor, args);
+        if ("bindService".equals(method.getName())) {
+            return methodProxy.invokeSuper(target, args);
+        }
+
+        if (method.getDeclaringClass() == Object.class) {
+            return methodProxy.invokeSuper(target, args);
+        }
+        String routingKey = routeKeyExtractor.extractRoutingKey(null, args);
 
         Node ownerNode = consistentHash.getOwnerNode(routingKey, membership.getPeers());
 
@@ -83,20 +95,16 @@ class RoutingInvocationHandler extends AbstractInvocationHandler {
     }
 
     private Channel getChannel(Node node) throws ExecutionException {
-        return channelCache.get(node, () -> {
-            return NettyChannelBuilder.forAddress(node.getHost(), node.getPort())
-                    .usePlaintext(true).
-                    userAgent("fwd:" + membership.getId()).build();
-        });
+        return channelCache.get(node, () -> NettyChannelBuilder
+                .forAddress(node.getHost(), node.getPort())
+                .usePlaintext(true)
+                .userAgent("fwd:" + membership.getId()).build());
     }
 
     public AbstractStub<?> newStub(Channel ch) {
         try {
-            Method newStubMethod = grpcFacadeClass.getMethod("newStub",
-                    new Class[] { Channel.class });
             return (AbstractStub<?>) newStubMethod.invoke(null, ch);
-        } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
-                | NoSuchMethodException | SecurityException e) {
+        } catch (ReflectiveOperationException e) {
             throw new RuntimeException("gRPC changed incompatibly", e);
         }
     }

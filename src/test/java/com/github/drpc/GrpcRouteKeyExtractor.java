@@ -1,7 +1,5 @@
 package com.github.drpc;
 
-import com.github.drpc.RouteKeyExtractor;
-
 import io.grpc.examples.helloworld.HelloRequest;
 
 public class GrpcRouteKeyExtractor implements RouteKeyExtractor {

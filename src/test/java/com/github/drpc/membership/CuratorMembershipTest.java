@@ -4,11 +4,10 @@ import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import com.github.drpc.membership.CuratorMembership;
-import com.github.drpc.membership.Node;
-
+@Ignore
 public class CuratorMembershipTest {
 
     @Test

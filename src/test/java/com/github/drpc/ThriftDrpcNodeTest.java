@@ -73,6 +73,12 @@ public class ThriftDrpcNodeTest {
         long diff = System.nanoTime() - start;
         System.out.println(String.format("%.2f req/s", iterations * 4.0
                 / diff * 1000 * 1000 * 1000));
+
+        rpc1.stop();
+        rpc1.awaitTermination();
+
+        rpc2.stop();
+        rpc2.awaitTermination();
     }
 
     private void init(ThriftDrpcServer rpc, int port) {

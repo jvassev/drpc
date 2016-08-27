@@ -1,11 +1,11 @@
 package com.github.drpc;
 
-import io.grpc.examples.helloworld.GreeterGrpc.Greeter;
+import io.grpc.examples.helloworld.GreeterGrpc;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.examples.helloworld.HelloResponse;
 import io.grpc.stub.StreamObserver;
 
-public class GrpcGreeterImpl implements Greeter {
+public class GrpcGreeterImpl extends GreeterGrpc.GreeterImplBase {
 
     private int port;
 

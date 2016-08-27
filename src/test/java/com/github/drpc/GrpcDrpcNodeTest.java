@@ -1,23 +1,20 @@
 package com.github.drpc;
 
-import io.grpc.Channel;
-import io.grpc.examples.helloworld.GreeterGrpc;
-import io.grpc.examples.helloworld.GreeterGrpc.Greeter;
-import io.grpc.examples.helloworld.GreeterGrpc.GreeterBlockingStub;
-import io.grpc.examples.helloworld.HelloRequest;
-import io.grpc.examples.helloworld.HelloResponse;
-import io.grpc.netty.NettyChannelBuilder;
-import io.grpc.netty.NettyServerBuilder;
-
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
-import org.junit.Test;
 
 import com.github.drpc.grpc.GrpcDrpcServer;
 import com.github.drpc.membership.Node;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import io.grpc.Channel;
+import io.grpc.examples.helloworld.GreeterGrpc;
+import io.grpc.examples.helloworld.GreeterGrpc.GreeterBlockingStub;
+import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.examples.helloworld.HelloResponse;
+import io.grpc.netty.NettyChannelBuilder;
+import io.grpc.netty.NettyServerBuilder;
+import org.junit.Test;
 
 public class GrpcDrpcNodeTest {
 
@@ -73,6 +70,12 @@ public class GrpcDrpcNodeTest {
         long diff = System.nanoTime() - start;
         System.out.println(String.format("%.2f req/s", iterations * 4.0
                 / (diff / 1000 / 1000 / 1000)));
+
+        rpc1.stop();
+        rpc1.awaitTermination();
+
+        rpc2.stop();
+        rpc2.awaitTermination();
     }
 
     private Channel init(GrpcDrpcServer node, int port) {
@@ -90,7 +93,7 @@ public class GrpcDrpcNodeTest {
                 Executors.newFixedThreadPool(20));
         node.setServerBuilder(serverBuilder);
 
-        node.addService(Greeter.class, new GrpcGreeterImpl(port));
+        node.addService(GreeterGrpc.GreeterImplBase.class, new GrpcGreeterImpl(port));
 
         Channel ch = NettyChannelBuilder.forAddress("localhost", port)
                 .usePlaintext(true)
